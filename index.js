@@ -1,5 +1,6 @@
 
-// each tree node has a attribute pathName, which in format of { pathName: '/aaa/bbb', action: 'include'/'exclude'}
+
+// each tree node has a attribute pathName, which in format of { criteria: {pathName: '/aaa/bbb', brand: 'KFC'}, action: 'include'/'exclude'}
 function Query (rules) {
   this._compileSelections(rules);
 }
@@ -7,29 +8,40 @@ function Query (rules) {
 function explainSelectionTreeNodesAsIfStatments (treeNodes) {
   var lines = [];
   (treeNodes || []).forEach(function (node) {
-    lines.push('if(' + node.pathName + ') {');
+    lines.push('if(' + JSON.stringify(node.rule.criteria) + ') {');
     var childLines = explainSelectionTreeNodesAsIfStatments(node._children);
     childLines.forEach(function (line) {
       lines.push('  ' + line);
     });
-    lines.push('  return ' + (node.action === 'include'));
+    lines.push('  return ' + (node.rule.action === 'include'));
     lines.push('}');
   });
 
   return lines;
 }
 
+function extend (obj1, obj2) {
+  for(var key in obj2) {
+    obj1[key] = obj2[key];
+  }
+  return obj1;
+}
+
 function compileSelectionTreeToQuery (node) {
   var query = {};
   var ands = query.$and = [];
+
+  var nodeQueryExp = extend({}, node.rule.criteria);
+  nodeQueryExp.pathName = {$regex: '^' + node.rule.criteria.pathName};
+
   if(!node._children) {
-    ands.push({pathName: {$regex: '^' + node.pathName}});
-    if(node.action === 'exclude') {
+    ands.push(nodeQueryExp);
+    if(node.rule.action === 'exclude') {
       ands.push({pathName: null});
     }
     return query;
   }
-  ands.push({pathName: {$regex: '^' + node.pathName}});
+  ands.push(nodeQueryExp);
 
   var ors = [];
   ands.push({$or: ors});
@@ -40,11 +52,17 @@ function compileSelectionTreeToQuery (node) {
   });
 
   var elseCases = node._children.map(function (child) {
-    return {pathName: {$not: {$regex: '^' + child.pathName}}};
+    var childQueryExp = extend({}, child.rule.criteria);
+    childQueryExp.pathName = {$regex: '^' + child.rule.criteria.pathName};
+    return childQueryExp;
   });
-  if(node.action === 'include') {
+
+  // --------    --------    --------            --------------------------------------
+  // P1 && B1 && P2 && B2 && P3 && B3  <======>  (P1 && B1) || (P2 && B2) || (P3 && B3)
+  // {$and: [{$nor: [{P1, B1}]}, {$nor: [{P2, B2}]}, {$nor: [{P3, B3}]}]} <=====> {$nor: [{P1, B1}, {P2, B2}, {P3, B3}]}
+  if(node.rule.action === 'include') {
     ors.push({
-      $and: elseCases
+      $nor: elseCases
     });
   } else {
     // force negative
@@ -66,36 +84,36 @@ function compileSelectionTreeNodesToQuery (treeNodes) {
   return query;
 }
 
-Query.prototype._compileSelections = function (selections) {
-  var selectionMemo = {};
-
-  selections.forEach(function (selection) {
-    selectionMemo[selection.pathName] = selection;
-    delete selection._parent;
-    delete selection._children;
+Query.prototype._compileSelections = function (rules) {
+  var selectionNodes = rules.map(function (rule) {
+    return {rule: rule, _parent: null, _children: null};
   });
 
-  selections.forEach(function (selection) {
-    var pathParts = selection.pathName.split('/');
+  var selectionNodeMemo = {};
+  selectionNodes.forEach(function (selectionNode) {
+    selectionNodeMemo[selectionNode.rule.criteria.pathName] = selectionNode;
+  });
+
+  selectionNodes.forEach(function (selectionNode) {
+    var pathParts = selectionNode.rule.criteria.pathName.split('/');
     pathParts.shift();
 
     for(var i = pathParts.length - 1; i > 0; i--) {
       var pathName = '/' + pathParts.slice(0, i).join('/');
-      console.log(pathName);
-      var parent = selectionMemo[pathName];
+      var parent = selectionNodeMemo[pathName];
 
       if(parent) {
-        selection._parent = parent;
+        selectionNode._parent = parent;
         parent._children = parent._children || [];
-        parent._children.push(selection);
+        parent._children.push(selectionNode);
         break;
       }
     }
   });
 
-  var selectionTreeRoots = selections.reduce(function (result, selection) {
-    if(!selection._parent) {
-      result.push(selection);
+  var selectionTreeRoots = selectionNodes.reduce(function (result, selectionNode) {
+    if(!selectionNode._parent) {
+      result.push(selectionNode);
     }
     return result;
   }, []);
