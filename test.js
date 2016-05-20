@@ -137,3 +137,21 @@ query = new Query(input);
 console.log(query.explanation);
 
 console.log(JSON.stringify(query.query, '  ', 2));
+
+
+console.log('///////////////////////////////////');
+
+input = [
+];
+
+console.log('for input: ')
+console.log(JSON.stringify(input, '  ', 2));
+
+console.log('result is: ');
+query = new Query(input);
+
+
+console.log(query.explanation);
+
+console.log(JSON.stringify(query.query, '  ', 2));
+

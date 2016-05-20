@@ -80,7 +80,10 @@ function compileSelectionTreeNodesToQuery (treeNodes) {
   treeNodes.forEach(function (node) {
     ors.push(compileSelectionTreeToQuery(node));
   });
-
+  if(query.$or.length === 0) {
+    // negate the query
+    query = {pathName: null};
+  }
   return query;
 }
 
